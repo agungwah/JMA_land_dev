@@ -1,10 +1,16 @@
-; Jabodetabek (JMA) urban model 
+; Jabodetabek (JMA) urban model
 ; cell size 300m x 300 m = 90000m2 = 9ha
+; -- the structure of coding was adapted from Valbuena effect of faremer decision on the landscape of Dutch rural region
 ; -- created by Agung Wahyudi
-; -- first created 28/08/2014
-; -- modified 29/08/2014 the go procedure
-; -- modified 18/11/2014 add update procedure etc
-; -- version 0.11
+; -- first created 02/07/2015
+; -- modification from JMA_land_devt_v0_1.nlogo file
+; --  the modificaiton include
+; --  - Land searching, compare between the visited sites
+; --  - Land decision to build, can be hold, or build immediately
+; --  - Land expansion and land values change according to feasible pixel
+; --  - Developer profit is collected during the run
+; --  - Developer has typology . Small, large, and mix
+; version 1
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
@@ -17,28 +23,42 @@
 ; buyers are in 25-30 yo p.190
 ; average hh size 4.3 p.190
 
+; modification 22/04/2016: to run behaviourspace, choose only 1 run per simulation. the default is 4.
+; modification 23/04/2016: adding circular lines for reference, add export module to export to png
+;                          adding extension GIS, annotation
+
 
 ;==========================
-; DEFINE THE VARIABLES
+; 1. DEFINE THE VARIABLES
 ;==========================
+
+extensions [gis]
+globals    [view-mode]
 
 breed [developers developer]
+breed [annotations annotation]
 
 developers-own [
-                developer-age                         ; Time frome first land acquisition to release
-                developer-init-capital                ; Unit in billion IDR. Initial capital
-                developer-loan                        ; Unit in billion IDR. loan from external sources, max 75% from initial capital
+                developer-age                         ; Time from first land acquisition to release
+                developer-capital-init                ; Unit in billion IDR. Initial capital
+                developer-capital-loan                ; Unit in billion IDR. loan from external sources, max 75% from initial capital
                 developer-capital                     ; Unit in billion IDR. Accumulated capital owned to purchase, develop land
-                developer-expected-profit             ; not sure, if this supposed to be here???
-                developer-profits                     ; Unit in billion IDR. Income from selling the house
-                developer-profits-prior
-                developer-land-size
-                
+                developer-profit-expected             ; not sure, if this supposed to be here???
+                developer-profit                      ; Unit in billion IDR. Income from selling the house
+                developer-profit-prior                ;
+                developer-land-size                   ; Current occupied land size
+
+                developer-type                        ; classification of developers based on capital, "large", "small", not used in this version
                 developer-temp-cost                   ; temporary cost
-                developer-cost-here
-                developer-cost-neighbour
-   
-                
+                developer-mode                        ; search, develop, expand
+                developer-lv-perceive                 ; land-value-perceived
+
+                d-search-area                         ; check p76 thesis
+                d-target-size                         ; tarket size have already in mind (Kaiser) in ha
+                d-expected
+                d-site-clearance
+                d-development-time
+
                ]
 
 
@@ -46,10 +66,10 @@ patches-own [
              field-land-use-ori                       ; original values before simulation starts
              field-land-value-ori                     ; original values before simulation starts
              field-dist-cbd-ori                       ; original values before simulation starts
-      
+
              field-land-use                           ; Current land use at start is 1994
              field-land-value                         ; Unit in juta (million IDR) per sq m ; raw land value
-             field-land-value-pxl                     ; Unit in juta (million IDR) per pixel 
+             field-land-value-pxl                     ; Unit in juta (million IDR) per pixel
              field-land-value-perceived
              field-dist-cbd                           ; Unit in pixel (x 30 m) Distance in km from CBD (Jakarta)
              field-dist-road                          ; Unit in km. Distance in km from the main or toll roads
@@ -63,39 +83,83 @@ patches-own [
 
 
 ;==========================
-; LOAD 
+; 2. LOAD
 ;==========================
 
 to load-input
+  
+  clear-all 
+  
+  gis:load-coordinate-system (word "Input/landcover_94.prj")
+  gis:set-world-envelope [644205 756105 -753435 -652635]
+  
+  ; load adm boundary
+  let boundary gis:load-dataset (word "Input/JMA_adm2_jkt_merge.shp")
+  foreach gis:feature-list-of boundary
+   [
+     gis:set-drawing-color 3
+     gis:draw ? 1.0
+   ]
+   
+   ; load circular lines
+  let circular gis:load-dataset (word "Input/JMA_radius.shp")
+  foreach gis:feature-list-of circular
+   [
+     gis:set-drawing-color white
+     gis:draw ? 2.5
+     
+     gis:set-drawing-color red
+     gis:draw ? 2
+   ]
+  
+  
+  ; load legendScale
+;  let legendScale gis:load-dataset (word "Input/legend_scale_10_20.shp")
+;  foreach gis:feature-list-of legendScale
+;   [
+;     gis:set-drawing-color 0
+;     gis:draw ? 2.0     
+;   ]
+;  
+;    ; load legendNorth
+;  let legendNorth gis:load-dataset (word "Input/legend_north.shp")
+;  foreach gis:feature-list-of legendNorth
+;   [
+;     gis:set-drawing-color 0
+;     gis:draw ? 1.0
+;     gis:fill ? 0
+;   ]
+;  
+  
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
   foreach sort patches [ask ? [set field-land-use-ori file-read] ]
   file-close
-  
-  ; Load distance from toll road 
+
+  ; Load distance from toll road
   file-open "jma_tollroad_buff.txt"
   foreach sort patches [ask ? [set field-dist-road file-read] ]
-  file-close  
-  
+  file-close
+
   ; Load land-values
   file-open "jma_land_val_v5.txt"
   foreach sort patches [ask ? [set field-land-value-ori file-read] ]
-  file-close 
-  
+  file-close
+
   let field-land-value-negative patches with [field-land-value-ori != -9999 and field-land-value-ori < 0]
-  ask field-land-value-negative 
+  ask field-land-value-negative
   [
     set field-land-value-ori 1
-  ]  
-  
+  ]
+
   ask patches with [ field-land-value-ori != -9999 ]
   [
-    set field-land-value-pxl 
-    precision (field-land-value-ori * 90) 2                          ; land value in pixel, unit billion (milyar)/9 ha
-    set field-land-value-ori 
-    precision (field-land-value-ori / 1000) 5                        ; in billion (milyar) originally in million (juta) IDR 
+    set field-land-value-pxl
+    precision (field-land-value-ori * 90) 2           ; land value in pixel, unit billion (milyar)/9 ha
+    set field-land-value ;-ori
+    precision (field-land-value-ori / 1000) 5         ; in billion (milyar) originally in million (juta) IDR
   ]
-  
+
   ; Load distance from CBD
   ask patches
   [
@@ -103,107 +167,129 @@ to load-input
     set field-dist-cbd-ori field-dist-cbd-ori * 0.3                    ; distance from CBD in km
     set field-dist-cbd-ori precision field-dist-cbd-ori 2              ; set two decimal behind comma
   ]
-  
+
 end
 
 
 
 ;==========================
-; MODEL AT 'START'
+; 3. MODEL AT 'START'
 ;==========================
 
 to setup
-  clear-turtles                                       ; clear all 
+  clear-turtles                                       ; clear all
   clear-all-plots                                     ; clear all plots
-  
-  reset
-  define-patches                                      ; set default parameters for environment
+
+  define-land                                         ; set default parameters for environment
   define-developers                                   ; display agent, and load initial values
-    
+
   view-landuse
   reset-ticks
 end
 
-to reset
-  ask patches
-  [
-    set field-land-use        field-land-use-ori
-    set field-dist-cbd        field-dist-cbd-ori
-    set field-land-value-pxl  precision (field-land-value-ori * 90000) 2 
-        
-  ]
-end
+
 
 ;==========================
-; MODEL AT 'GO'
+; 4. MODEL AT 'GO'
 ;==========================
 
 to go
-  
-  find-land
-  assess-land
-  development-decision
-  expand-decision
 
-  
-  ; Updates
-  update-agent
-  update-field
-  
-  if not any? developers
-  [stop]
-  
+  random-seed new-seed         ; permutate the random seeds
+
+  land-find                    ; searching for land
+  land-development-assessment  ; assessment based on " Profit = Revenue - Cost "
+  land-development-decision    ; decision to develop, " yes or no ", based on the expected profit
+  land-development-action      ; development action, no develop, land banking, based on the notion of??
+;  land-expansion               ; decision to expand -- based on minimun required profit, size, and image/profile of the company
+;
+;  update-developer             ; update the developer's profit, mode, and capital, land size
+  update-view                  ; update view
+;  update-stop                  ; if there is no agent, or all the area has been visited, then stop
+
+
+   if ticks = 100
+   [stop]
+tick
+
 end
 
 
 ;==========================
 ; VIEW THE INPUT
 ;==========================
+; view the map should not be returned to Land cover
+; view map should be follow the active button as requested by the user
+; check with Valbuena
 
 to view-landuse
   ask patches
   [
-    if field-land-use = 0      [set pcolor grey]                  ; No data  
-    if field-land-use = 1      [set pcolor blue - 2]              ; Sea water
-    if field-land-use = 2      [set pcolor blue + 2]              ; Water bodies  
-    if field-land-use = 3      [set pcolor green + 3]             ; Vegetation dense
-    if field-land-use = 4      [set pcolor green]                 ; Vegetation sparse
-    if field-land-use = 5      [set pcolor pink]                  ; Residential dense
-    if field-land-use = 6      [set pcolor yellow]                ; Residential sparse/vegetated
-    if field-land-use = 7      [set pcolor red]                   ; Commercial industries 
-    if field-land-use = 55     [set pcolor black]                 ; NEW resid area   
+    if field-land-use = 0      [set pcolor grey]                 ; No data
+    if field-land-use = 1      [set pcolor blue - 2]                 ; Sea water blue - 2
+    if field-land-use = 2      [set pcolor blue + 2]                 ; Water bodies
+    if field-land-use = 3      [set pcolor white]                 ; Vegetation dense green + 3
+    if field-land-use = 4      [set pcolor white]                 ; Vegetation sparse green
+    if field-land-use = 5      [set pcolor pink]                     ; Residential dense
+    if field-land-use = 6      [set pcolor pink]                 ; Residential sparse/vegetated
+    if field-land-use = 7      [set pcolor red]                     ; Commercial industries
+    if field-land-use = 55     [set pcolor black]                 ; NEW resid area
   ]
+  
+;    ask patches
+;  [
+;    if field-land-use = 0      [set pcolor grey]                  ; No data  ; show extract-rgb grey
+;    if field-land-use = 1      [set pcolor blue - 2]              ; Sea water [31 57 104]
+;    if field-land-use = 2      [set pcolor blue + 2]              ; Water bodies  [133 158 203] ;
+;    if field-land-use = 3      [set pcolor green + 3]             ; Vegetation dense white [255 255 255]
+;    if field-land-use = 4      [set pcolor green]                 ; Vegetation sparse
+;    if field-land-use = 5      [set pcolor pink]                  ; Residential dense
+;    if field-land-use = 6      [set pcolor yellow]                ; Residential sparse/vegetated
+;    if field-land-use = 7      [set pcolor red]                   ; Commercial industries 
+;    if field-land-use = 55     [set pcolor black]                 ; NEW resid area   
+;  ]
+;end
+  
 end
 
 to view-distance-road
   ask patches
   [
-    set pcolor scale-color 115 field-dist-road 0 20
-    ; mask
-    if (field-dist-road = -9999)     [set pcolor white]           ; NoData
-    if field-land-use = 0            [set pcolor grey]            ; No data 
-    if field-land-use = 1            [set pcolor blue - 2]        ; Sea water
+    if field-dist-road > 0
+    [
+      set pcolor scale-color 75 (ln field-dist-road) 3  0         ; ori color 115
+    ]
+
+    if (field-dist-road = -9999)     [set pcolor black]           ; NoData
+    if field-land-use = 0            [set pcolor grey + 2]        ; No data
+    if field-land-use = 1            [set pcolor grey + 2 ]       ; Sea water
+    if field-land-use = 55           [set pcolor black]           ; New urban area
   ]
 end
 
 to view-land-value
   ask patches
   [
-    set pcolor scale-color 75 field-land-value-pxl 0 3000
-    
-    if field-land-value = -9999      [set pcolor grey]            ; NoData
-    if field-land-use = 1            [set pcolor blue - 2]        ; Sea water
+    if field-land-value-pxl > 0
+    [
+      set pcolor scale-color 75 (ln field-land-value-pxl) 4.5 8.5
+    ]
+
+    if field-land-value-ori = -9999  [set pcolor white]           ; NoData
+    if field-land-use = 1            [set pcolor white]           ; Sea water
+    if field-land-use = 55           [set pcolor black]           ; New urban area
   ]
 end
 
 to view-distance-cbd
   ask patches
   [
-    set pcolor scale-color cyan field-dist-cbd 0 200
-    
-    if field-land-use = 1            [set pcolor blue - 2]        ; Sea water
-    if field-land-use = 0            [set pcolor grey]            ; No data 
-  ]  
+    set pcolor scale-color 75 (ln (field-dist-cbd + 0.1)) 4 0     ; ori color cyan
+
+    if field-land-use = 1            [set pcolor white]           ; Sea water
+    if field-land-use = 0            [set pcolor white]           ; No data
+    if field-land-use = 55           [set pcolor black]           ; New urban area
+  ]
 end
 
 
@@ -212,41 +298,66 @@ end
 ; Define
 ;==========================
 
+to set-annotations
+  create-annotations 1
+  [
+    setxy 139 305
+  ]
+end
+
 to define-developers
   ; according to winarso p79, not more than 50 developers in JMA
   create-developers num-developers
   [
-    set color red - random-float 3                                                  
-    setxy 192 224 
+    let land-position patches with [field-land-use > 2]
+    set color red - random-float 3
+    setxy random-xcor random-ycor ;192 224
+    move-to one-of land-position
+
     set size 15
     set shape "person"
     set label-color white
-    
-    set developer-age 7
-    set developer-land-size 0
-    set developer-init-capital 
-    random-normal initial-capital (3 * initial-capital / 100)
-    set developer-loan (developer-init-capital * initial-loan / 100)
-    set developer-capital (developer-init-capital + developer-loan)  
-    
-    set developer-init-capital precision developer-init-capital 2
-    set developer-loan         precision developer-loan 2
-    set developer-capital      precision developer-capital 2
 
-    update-agent
+    set developer-age 0
+    set developer-land-size 0
+
+    set developer-capital-init     random-normal initial-capital (3 * initial-capital / 100)
+    set developer-capital-loan    (developer-capital-init * initial-loan / 100)
+    set developer-capital         (developer-capital-init + developer-capital-loan)
+    set developer-profit-expected ( developer-capital * 1.15 )
+    set developer-lv-perceive     ( land-value-perceived )
+
+    set developer-capital-init     precision developer-capital-init    2
+    set developer-capital-loan     precision developer-capital-loan    2
+    set developer-capital          precision developer-capital         2
+    set developer-profit-expected  precision developer-profit-expected 2
+    set developer-lv-perceive      precision land-value-perceived      2
+
+
+    set developer-mode  "searching"
+
+    update-developer
   ]
 end
 
 
-to define-patches
+to define-land
   ask patches
   [
     set field-visited?    "false"                                 ; deauflt pixels are not visited
     set field-assessed?   "false"                                 ; default pixels are not assessed
-    set field-developed?  "false"                                 ; default pixels are not assessed
-    set field-land-value-perceived perceived-land-value           ; perceived land values add random  
-  ] 
+    set field-developed?  "false"                                 ; default pixels are not developed
+
+    set field-land-use        precision (field-land-use-ori) 2
+    set field-dist-cbd        precision (field-dist-cbd-ori) 2
+    set field-land-value-pxl  precision (field-land-value-ori * 90) 2           ; land value in pixel, unit billion (milyar IDR)/9 ha
+    set field-land-value      precision (field-land-value-ori / 1000) 2
+
+    set field-land-value-perceived precision (land-value-perceived) 2           ; perceived land values add random
+  ]
 end
+
+
 
 
 
@@ -255,214 +366,353 @@ end
 ;==========================
 
 
-to find-land
-  ask developers
-  [ 
-    set developer-temp-cost 0
-    set developer-land-size 0
-    let find-suit-patches   patches with 
-                            [ field-land-value > 0 
-                              and (field-visited? = "false") 
-                              and field-land-use > 2
-                            ]
-    let find-best-patches   min-n-of num-developers find-suit-patches [field-land-value-perceived]
+to land-find
+; option, movement (i) random, (ii) frog jump, and (iii) fwd shift
+; option (i)    setxy random-xcor random-ycor
+; option (ii)   move-to one-of find-best-patches
+; option (iii)  downhill field-land-value-perceived
 
-    
-    ifelse ( developer-capital > 0 and find-best-patches != nobody )
-    [      
-      move-to one-of find-best-patches
-      set developer-capital (developer-capital - 0.010)
-      
+  ask developers
+  [ if ( developer-capital > 0 and any? patches with [(field-visited? = "false")]  )
+    [
+      set developer-mode "searching"
+      set developer-temp-cost 0
+
+      let find-suit-patches   patches with
+                            [ field-land-value > 0       and
+                              field-visited?   = "false" and
+                              field-land-use   > 2
+                            ]
+
+      ifelse any? developers with [developer-type = "large"] ;while
+      [
+        let find-best-patches   min-n-of num-developers find-suit-patches [field-land-value-perceived]
+        move-to one-of find-best-patches
+      ]
+      [stop]
+
+      set developer-capital      precision  (developer-capital - 0.010) 2
+      set developer-lv-perceive  precision  (land-value-perceived ) 2
+
       ask patch-here [ set field-visited? "true" ]
       ask patches in-radius ( field-assessment-radius / .3) [ set field-visited? "true" ]
     ]
-    [ die ]
+
   ]
-  
+
+end
+
+to land-select
+  ; something like , list  5 visited sites
+  ; select one of the most profitable
 end
 
 
+to land-development-assessment
 
-to assess-land
-  
   ask developers
   [
-    ask patch-here 
-    [ set field-assessed? "true" 
+    let patches-centre                      ( [field-total-cost] of patch-here )
+    let patches-neighbour patches in-radius ( 3 / .3) with [ field-land-value-pxl > 0 ]  ; field-assessment-radius
+    let patches-neighbour-target min-n-of   (d-target-size / 9) patches-neighbour [distance myself]        ; change into selecting the closer and lower cost cell
+    let sum-patches-neighbour-target        (( sum [field-site-improvement] of patches-neighbour-target ) + ( sum [land-value-perceived] of patches-neighbour-target ))
+
+    set developer-temp-cost                 ( patches-centre + sum-patches-neighbour-target)
+    set developer-temp-cost                 precision developer-temp-cost 2
+    set developer-profit-expected           precision (( mean [field-profit-as-dist-cbd] of patches-neighbour-target ) * developer-capital) 2
+
+    ask patch-here
+    [ set field-assessed? "true"
       set field-visited?  "true"
     ]
-    
-    let best-patches ( [field-total-cost] of patch-here )
-    set developer-temp-cost best-patches 
-    
-    
-    let neighbour-patches patches in-radius ( field-assessment-radius / .3) with [ field-land-value-pxl > 0 ]
-    let sum-neighbour-land-value            ( sum [perceived-land-value]   of neighbour-patches )
-    let sum-neighbour-site-devt             ( sum [field-site-improvement] of neighbour-patches )
-    set developer-temp-cost                 ( developer-temp-cost + sum-neighbour-land-value )
-    set developer-temp-cost                 ( developer-temp-cost + sum-neighbour-site-devt )
-    set developer-temp-cost                 precision developer-temp-cost 2
   ]
+
 end
 
 
-to development-decision
-  
+to land-development-decision
   ask developers
-  [ ifelse developer-temp-cost > ( developer-capital * 5 ) ; scenario optimist, higher 10, 5, 2.5, 1.25
-    [ find-land ]
-    [ develop-land ]
-  ]
-  
-  
-end
-
-
-
-to develop-land
-  ask patch-here
   [
-    set field-assessed?    "true" 
-    set field-visited?     "true"
-    set field-developed?   "true"   
-    set field-land-use      55
-    set pcolor              black
-    
-  ]
-  
-  set developer-capital developer-capital - field-land-value-pxl ; field-total-cost
-  set developer-land-size developer-land-size + 9
-  
-  while [ developer-capital > 0 ]
-  [ expand-move
-    expand-land
-  ]
-  
+    ; needs revision
+    ifelse ( developer-profit-expected - developer-temp-cost ) > ( developer-capital * 0.15) ; maybe use a range
+    [ set developer-mode "developing" ]
+    [ set developer-mode "searching"  ]
+   ]
+
+
 end
 
-to expand-decision
+
+to land-development-action
+  ; set new land cover
+  ; set new land value
+  ; set new developer profit
+  ; set new developer capital
   ask developers
-  [ 
-    while [ developer-capital > 0 ] [ expand-land ]
+  [ if developer-mode = "developing"
+    [
+      update-land-cover
+      update-land-value
+    ]
+;     set developer-capital developer-capital - field-total-cost
+;     set developer-capital precision developer-capital 2
+;     set developer-land-size developer-land-size + 9
+
   ]
+
 end
-  
 
-; let candidate-neighbour-patches min-n-of 20 neighbour-patches with [field-land-value > 0] [distance myself] 
-; recharge capital otherwise no development
+;to land-development-pay
+;  ask developer
+;  [
+;    set developer-capital  ( developer-capital - developer-temp-cost )
+;  ]
+;end
 
-to expand-land
-  ; expand-move
-  
-  ask patch-here 
-  [ 
-    set field-assessed? "true" 
+
+
+to land-expansion
+  ask developers
+  [
+
+  let find-expand-patches min-n-of 15 patches in-radius ( field-assessment-radius / .3) with
+                                                      [   field-developed?  = "false" and
+                                                          field-land-value != -9999 and
+                                                          field-land-value > 0 ]
+                                                       [  field-expansion-cost ]
+
+  ask find-expand-patches
+  [
+    set field-assessed? "true"
     set field-visited?  "true"
     set field-developed?  "true"
     set field-land-use 55
     set pcolor black
   ]
-  
-  set developer-capital developer-capital - field-land-value-pxl ; field-expansion-cost
-  set developer-land-size developer-land-size + 9
 
+  set developer-capital ( developer-capital - ( sum [field-expansion-cost] of find-expand-patches ) )
+  set developer-capital precision developer-capital 2
+   ]
+
+
+  ; something like , check surrounding cell
+  ; calculate the profit
+  ; acquire, and convert
 end
 
-to expand-move
-  
-  let find-expand-patches min-one-of neighbors with [ field-developed? = "false" and field-land-value != -9999 ] [ field-land-value-perceived ]
-  
-  ifelse ( developer-capital > 0 and find-expand-patches != nobody )
-  [ move-to find-expand-patches ]
-  [ die ]  
-  
+to land-construction
+  ; something like ifelse
+  ; if true , convert the land
+  ; else, land banking?
 end
 
-
-; size? enough
-
-to raise-price
-  let field-new-urban patch-here 
-  ask field-new-urban              [ set field-land-value-pxl ( field-land-value-pxl * 1.30 ) ]
-  ask field-new-urban in-radius 3  [ set field-land-value-pxl ( field-land-value-pxl * 1.20 ) ]
-  ask field-new-urban in-radius 6  [ set field-land-value-pxl ( field-land-value-pxl * 1.10 ) ]
-  ask field-new-urban in-radius 9  [ set field-land-value-pxl ( field-land-value-pxl * 1.05 ) ]
-  ask field-new-urban in-radius 12 [ set field-land-value-pxl ( field-land-value-pxl * 1.01 ) ]
-  if field-land-value-pxl > 3000   [ set field-land-value-pxl 3000 ] 
+to field-threshold-profit
+  ; i dont know
+  ; but seems important
 end
 
 
-
-;==========================
-; To REPORT
-;==========================
-
-to-report perceived-land-value
-  report (field-land-value-pxl +  random-float (3 * field-land-value-pxl / 100))
-end
-
-to-report field-road-construction
-  
-  ifelse (field-dist-road > 18)
-  [ report random-normal (field-dist-road * 30) (( 30 * field-dist-road ) * 5 / 100) ] 
-  
-  [ ifelse (field-dist-road > 12)
-    [ report random-normal (field-dist-road * 20) (( 20 * field-dist-road ) * 5 / 100)]
-    
-    [ ifelse (field-dist-road > 6 )
-      [ report random-normal (field-dist-road * 18) (( 18 * field-dist-road ) * 5 / 100)] 
-      
-      [ ifelse (field-dist-road > 0 )
-        [ report random-normal (field-dist-road * 15) (( 15 * field-dist-road ) * 5 / 100)]
-        [ report field-dist-road * -1 ]   
-    ]
-  ]
-  ]
-
-
-end
-
-to-report field-site-improvement
-  if field-land-use = 0      [ report field-land-value-pxl * 0   ]                  ; No data 
-  if field-land-use = 1      [ report field-land-value-pxl * 0   ]                  ; Sea water
-  if field-land-use = 2      [ report field-land-value-pxl * 0   ]                  ; Water bodies  
-  if field-land-use = 3      [ report field-land-value-pxl * 0   ]                  ; Vegetation dense
-  if field-land-use = 4      [ report field-land-value-pxl * 0   ]                  ; Vegetation sparse
-  if field-land-use = 5      [ report field-land-value-pxl * 0.5 ]                  ; Residential dense
-  if field-land-use = 6      [ report field-land-value-pxl * 0.2 ]                  ; Residential sparse/vegetated
-  if field-land-use = 7      [ report field-land-value-pxl * 5   ]                  ; Commercial industries 
-  if field-land-use = 55     [ report field-land-value-pxl * 0.5 ]                  ; NEW resid area    
-end
-
-to-report field-total-cost
-  report ( perceived-land-value + field-road-construction + field-site-improvement )
-end
-
-to-report field-expansion-cost
-  report ( perceived-land-value + field-site-improvement )
-end
-
-to-report field-want-to-buy?
-  report  field-total-cost <= developer-capital
-end
 
 
 ;==========================
 ; UPDATE
 ;==========================
 
-to update-agent
+to update-developer
   if any? developers
   [ ask developers
-    [ set label precision developer-capital 2 ]
+    [ set label precision developer-capital 2
+
+      ; accumulate the capital
+      set developer-capital (developer-capital + developer-profit)
+      set developer-profit 0 ; reset profit
+
+      ; accumulate the size of area owned by the developers??
+
+      ; categorize the developer as per capital (and the size owned??)
+      let developer-capital-cutoff 1500
+      ;if  developer-capital <= 100 [die]
+      if  developer-capital <= developer-capital-cutoff [set developer-type "small" set color blue]
+      if  developer-capital >  developer-capital-cutoff [set developer-type "large"]
+
+      ; developer gets older regardles the capital
+      set developer-age (developer-age + 1)
+
+      ; update the characteristics
+      update-developer-characteristic
+     ]
+
+  ]
+    ; To redefine the classification of the developers
+
+
+
+end
+
+
+
+to update-developer-characteristic
+  ask developers
+  [
+    if developer-type = "small"
+      [
+        set   d-search-area          1
+        set   d-target-size          1
+        set   d-expected             0
+        set   d-site-clearance       0
+        set   d-development-time     12
+      ]
+
+       if developer-type = "large"
+      [
+        set   d-search-area          5
+        set   d-target-size          100                   ; 100 hectare =~ 10 cells
+        set   d-expected             1
+        set   d-site-clearance       1
+        set   d-development-time     36                    ; 36 ticks (months) they have no limit on deadline
+      ]
+  ]
+  end
+
+
+to update-land-cover
+  ask patch-here
+  [
+    set field-assessed?    "true"
+    set field-visited?     "true"
+    set field-developed?   "true"
+    set field-land-use      55
+    set pcolor              black
+  ]
+
+  let patches-neighbour patches in-radius ( 3 / .3) with [ field-land-value-pxl > 0 ]  ; field-assessment-radius
+  let patches-neighbour-target n-of       (d-target-size / 9) patches-neighbour
+
+  ask patches-neighbour-target
+  [
+    set field-assessed?    "true"
+    set field-visited?     "true"
+    set field-developed?   "true"
+    set field-land-use      55
+    set pcolor              black
   ]
 end
 
-to update-field
-  view-landuse
-  ; view-land-value
+
+to update-land-value
+
+;  if  ( remainder ticks 12 )  = 0
+;  [
+
+  ; ask patches where there is an active development to increase its value
+  ; perhaps after 12 month , let say, 1 tick is 1 month. The tick stops after 12x18= 216
+  ask patches in-radius 12 [ set field-land-value-pxl ( field-land-value-pxl * 1.10 ) ]
+  ask patches in-radius 9  [ set field-land-value-pxl ( field-land-value-pxl * 1.30 ) ]
+  ask patches in-radius 6  [ set field-land-value-pxl ( field-land-value-pxl * 1.50 ) ]
+  ask patches in-radius 3  [ set field-land-value-pxl ( field-land-value-pxl * 1.90 ) ]
+  ask patch-here           [ set field-land-value-pxl ( field-land-value-pxl * 2.00 ) ]
+  if field-land-value-pxl > 3000   [ set field-land-value-pxl 3000 ]
+;  ]
+
+
 end
 
+
+
+to update-view
+  if view-mode = "land-cover" [view-landuse]
+  if view-mode = "land-value" [view-land-value]
+  if view-mode = "dist-cbd"   [view-distance-cbd]
+  if view-mode = "dist-road"  [view-distance-road]
+end
+
+
+
+to update-stop
+if not any? developers
+     or ( count developers <  1 )
+     or not any? patches with [(field-visited? = "false")]
+  [stop]
+end
+
+
+;==========================
+; To REPORT
+;==========================
+; perceived land values should be an agent perception on the land value
+; and should not fixed on the pixel.
+; check valbuena on list that changes everytime the agent do its move
+
+to-report land-value-perceived
+  let random-error  10
+  report (field-land-value-pxl +  random-float (random-error * field-land-value-pxl / 100)) ; price is always inflated than original
+end
+
+
+to-report field-profit-as-dist-cbd
+  ; report the Potential revenues with
+  ; unit in billion? juta rupiah
+  ; Gaussian function
+  ; based on empirical studies on different location or theory
+  let alpha     1.4
+  let beta      -3
+  let dist-max  50
+  report ( alpha * ( exp ( beta * (field-dist-cbd ^ 2) / (dist-max ^ 2)) ))         ; percent of capital
+end
+
+
+to-report field-road-construction
+  ; report the cost of road construction with 5% std
+  ; unit in billion? milyar rupiah
+  ; Gaussioan function
+  ; based on empirical studies on different location or theory
+  let alpha     100
+  let beta      -2
+  let dist-max  15
+  report 100 - ( alpha * ( exp ( beta * (field-dist-road ^ 2) / (dist-max ^ 2)) ))            ; 15 km from toll road, equal cost of 100 mill per km
+end
+
+to-report field-site-improvement
+  if field-land-use = 0      [ report field-land-value-pxl * 0   ]                  ; No data
+  if field-land-use = 1      [ report field-land-value-pxl * 0   ]                  ; Sea water
+  if field-land-use = 2      [ report field-land-value-pxl * 0.5 ]                  ; Water bodies
+  if field-land-use = 3      [ report field-land-value-pxl * 0   ]                  ; Vegetation dense
+  if field-land-use = 4      [ report field-land-value-pxl * 0   ]                  ; Vegetation sparse
+  if field-land-use = 5      [ report field-land-value-pxl * 0.5 ]                  ; Residential dense
+  if field-land-use = 6      [ report field-land-value-pxl * 0.2 ]                  ; Residential sparse/vegetated
+  if field-land-use = 7      [ report field-land-value-pxl * 1.5 ]                  ; Commercial industries
+  if field-land-use = 55     [ report field-land-value-pxl * 0.5 ]                  ; NEW resid area
+end
+
+to-report field-total-cost                                                           ; C_dev = LV_x + LV_y + LC_x + LC_y + C_road
+  report ( land-value-perceived + field-road-construction + field-site-improvement ) ; overhead component? large in large dev??
+end
+
+to-report field-expansion-cost
+  report ( land-value-perceived + field-site-improvement )
+end
+
+to-report field-want-to-buy?
+  ; should add conditional
+  ; if developer large
+  report  field-total-cost <= developer-capital
+end
+
+
+;==========================
+; EXPORT
+;==========================
+; REMEMBER TO CHANGE the name of the folder OUTPUT/"DATE"/
+
+to export-current-view
+  clear-turtles
+  set view-mode "land-cover"
+  update-view
+  export-view  (word "Output/20160421/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
+  set view-mode  "land-value"
+  update-view
+  export-view  (word "Output/20160421/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
+end
 
 
 ;==========================
@@ -472,11 +722,11 @@ end
 GRAPHICS-WINDOW
 210
 10
-966
-713
+1712
+1385
 -1
 -1
-2.0
+4.0
 1
 10
 1
@@ -519,7 +769,7 @@ BUTTON
 197
 97
 GO
-find-land\nassess-land\ndevelopment-decision\n\n\n;go
+go\n
 T
 1
 T
@@ -533,10 +783,10 @@ NIL
 BUTTON
 12
 169
-157
+199
 202
-Land values (blln IDR/sq m)
-view-land-value
+Land values (10^9 IDR/sq m)
+set view-mode \"land-value\"\nupdate-view\n\n
 NIL
 1
 T
@@ -560,10 +810,10 @@ View layer
 BUTTON
 13
 205
-157
+198
 238
 Distance to CBD (km)
-view-distance-cbd
+set view-mode \"dist-cbd\"\nupdate-view
 NIL
 1
 T
@@ -577,10 +827,10 @@ NIL
 BUTTON
 14
 241
-158
+197
 274
 Distance to road (km)
-view-distance-road
+set view-mode \"dist-road\"\nupdate-view
 NIL
 1
 T
@@ -594,10 +844,10 @@ NIL
 BUTTON
 12
 134
-156
+200
 167
-Land use (1994)
-view-landuse
+Land cover (1994)
+set view-mode \"land-cover\"\nupdate-view
 NIL
 1
 T
@@ -652,10 +902,10 @@ SLIDER
 373
 field-assessment-radius
 field-assessment-radius
-1
+0.1
 5
-5
-0.5
+0.1
+0.1
 1
 km
 HORIZONTAL
@@ -682,9 +932,9 @@ SLIDER
 409
 initial-capital
 initial-capital
-1000
-2000
-2000
+3000
+5000
+10000
 100
 1
 billion IDR
@@ -724,9 +974,9 @@ NIL
 
 MONITOR
 972
-153
+202
 1100
-198
+247
 New urban area (ha)
 (count patches with [field-land-use = 55] * 9)
 17
@@ -757,9 +1007,9 @@ Existing urban (ha)
 
 MONITOR
 972
-106
+155
 1101
-151
+200
 Field assessed (ha)
 (count patches with [field-assessed? = \"true\"] * 9)
 17
@@ -768,19 +1018,48 @@ Field assessed (ha)
 
 MONITOR
 972
-201
+107
 1099
-246
+152
 Field visited (fields)
 count patches with [field-visited? = \"true\"]
 17
 1
 11
 
+MONITOR
+972
+253
+1101
+298
+NIL
+count developers
+17
+1
+11
+
+PLOT
+971
+305
+1171
+455
+plot 1
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot count patches with [field-land-use = 55]"
+
 @#$#@#$#@
 ## WHAT IS IT?
 
-(a general understanding of what the model is trying to show or explain)
+The model represents the spatial behaviour of the private residential developers in searching and converting the non-urban land for new residential area. The model sets the aim to simulate the spatial consequence of developers on the urban pattern and land values in Jakarta Metropolitan Area, Indonesia.
 
 ## HOW IT WORKS
 
@@ -1124,6 +1403,79 @@ NetLogo 5.0.5
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="experiment_JMA_v0" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <final>export-view (word "land_value " date-and-time ".png")</final>
+    <metric>count patches with [field-land-use = 55]</metric>
+    <enumeratedValueSet variable="initial-loan">
+      <value value="0"/>
+      <value value="75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-dev-large">
+      <value value="4"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-developers">
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-dev-small">
+      <value value="9"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-capital">
+      <value value="3000"/>
+      <value value="4000"/>
+      <value value="5000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="field-assessment-radius">
+      <value value="0.1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="experiment_JMA_v1" repetitions="100" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="100"/>
+    <metric>count patches with [field-land-use = 55]</metric>
+    <enumeratedValueSet variable="initial-loan">
+      <value value="0"/>
+      <value value="75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-capital">
+      <value value="5000"/>
+      <value value="7000"/>
+      <value value="10000"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="experiment_JMA_visual_export" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <final>export-current-view</final>
+    <timeLimit steps="100"/>
+    <metric>count patches with [field-land-use = 55]</metric>
+    <enumeratedValueSet variable="initial-loan">
+      <value value="0"/>
+      <value value="75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-capital">
+      <value value="5000"/>
+      <value value="7000"/>
+      <value value="10000"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="experiment_JMA_visual_export_INSET" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <final>export-current-view</final>
+    <timeLimit steps="100"/>
+    <metric>count patches with [field-land-use = 55]</metric>
+    <enumeratedValueSet variable="initial-loan">
+      <value value="75"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="initial-capital">
+      <value value="10000"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
