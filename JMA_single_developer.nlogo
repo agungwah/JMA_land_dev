@@ -10,7 +10,6 @@
 ; --  - Land expansion and land values change according to feasible pixel
 ; --  - Developer profit is collected during the run
 ; --  - Developer has typology . Small, large, and mix
-; -- version 1.1
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
@@ -26,7 +25,7 @@
 ; modification 22/04/2016: to run behaviourspace, choose only 1 run per simulation. the default is 4.
 ; modification 23/04/2016: adding circular lines for reference, add export module to export to png
 ;                          adding extension GIS, annotation
-; modification 20 Mar 2019: adding new agent that changes the simbol of new urban into large plus sign: mimicry.nlogo
+; modification 20 04 2019 adding plus sign for new urban area
 
 
 ;==========================
@@ -38,7 +37,7 @@ globals    [view-mode]
 
 breed [developers developer]
 breed [annotations annotation]
-breed [pluses plus]                                   ; change new urban into plus sign
+breed [pluses plus]
 
 developers-own [
                 developer-age                         ; Time from first land acquisition to release
@@ -115,7 +114,7 @@ to load-input
    ]
 
 
-  ; load legendScale
+;  ; load legendScale
 ;  let legendScale gis:load-dataset (word "Input/legend_scale_10_20.shp")
 ;  foreach gis:feature-list-of legendScale
 ;   [
@@ -123,15 +122,16 @@ to load-input
 ;     gis:draw ? 2.0
 ;   ]
 ;
-;    ; load legendNorth
+;   ; load legendNorth
 ;  let legendNorth gis:load-dataset (word "Input/legend_north.shp")
 ;  foreach gis:feature-list-of legendNorth
 ;   [
 ;     gis:set-drawing-color 0
-;     gis:draw ? 1.0
+;     gis:draw ? 2.0
 ;     gis:fill ? 0
 ;   ]
-;
+
+
 
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
@@ -184,7 +184,6 @@ to setup
 
   define-land                                         ; set default parameters for environment
   define-developers                                   ; display agent, and load initial values
-  define-plus
 
   view-landuse
   reset-ticks
@@ -252,6 +251,7 @@ to view-landuse
 ;    if field-land-use = 55     [set pcolor black]                 ; NEW resid area
 ;  ]
 ;end
+
   ask pluses [set color black]
 
 end
@@ -283,8 +283,6 @@ to view-land-value
     if field-land-use = 1            [set pcolor white]           ; Sea water
     if field-land-use = 55           [set pcolor black]           ; New urban area
   ]
-
-  ask pluses [set color red]
 end
 
 to view-distance-cbd
@@ -363,10 +361,6 @@ to define-land
   ]
 end
 
-
-to define-plus
-  set-default-shape pluses "x"
-end
 
 
 
@@ -619,12 +613,7 @@ to update-land-cover
       set color black
       set size 4
     ]
-
-
   ]
-
-
-
 end
 
 
@@ -1481,7 +1470,7 @@ NetLogo 5.3.1
       <value value="10000"/>
     </enumeratedValueSet>
   </experiment>
-  <experiment name="experiment_JMA_visual_export" repetitions="1" runMetricsEveryStep="true">
+  <experiment name="experiment_JMA_visual_export" repetitions="1" runMetricsEveryStep="false">
     <setup>setup</setup>
     <go>go</go>
     <final>export-current-view</final>
@@ -1504,10 +1493,10 @@ NetLogo 5.3.1
     <timeLimit steps="100"/>
     <metric>count patches with [field-land-use = 55]</metric>
     <enumeratedValueSet variable="initial-loan">
-      <value value="75"/>
+      <value value="0"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="initial-capital">
-      <value value="10000"/>
+      <value value="5000"/>
     </enumeratedValueSet>
   </experiment>
 </experiments>
