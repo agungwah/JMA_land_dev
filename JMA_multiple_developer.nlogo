@@ -20,13 +20,15 @@
 ; --  - Addition of variability in the developers capital and characteristics
 ; --  - 7/APr/2016
 ; --  - Addition of adm boundary
-; --  - 25 Jun 2016  ; This is ABM version 1.1 (three types developers)
+; --  - 25 Jun 2016
 ; --  - modif on files ch 6 idea and brainstorming
 ; --  -  1.  Pixel land cover changes on Landsat change into 9 hectare (300x300).
 ; --  -  2.  Small developer works within territory
 ; --  -  3.  Four additional polar of growth (Bekasi, Bogor, Tangerang, and Depok), (?? where)
 ; --  -  4.  Type of revenue from houses is deemed varied, small houses per hectare returns a profit of xxx, whilst the large house per hectare generates xxx profit.
 ; --  -  5.  Does market converges to oligopoly? what would happen in the market and what would happen with the spatial pattern?
+; This is ABM version 2 (three types developers)
+
 
 
 ; some facts from winarso
