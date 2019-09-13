@@ -10,7 +10,7 @@
 ; --  - Land expansion and land values change according to feasible pixel
 ; --  - Developer profit is collected during the run
 ; --  - Developer has typology . Small, large, and mix
-; version 1
+; -- version 1.1
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
@@ -26,6 +26,7 @@
 ; modification 22/04/2016: to run behaviourspace, choose only 1 run per simulation. the default is 4.
 ; modification 23/04/2016: adding circular lines for reference, add export module to export to png
 ;                          adding extension GIS, annotation
+; modification 20 Mar 2019: adding new agent that changes the simbol of new urban into large plus sign: mimicry.nlogo
 
 
 ;==========================
@@ -37,6 +38,7 @@ globals    [view-mode]
 
 breed [developers developer]
 breed [annotations annotation]
+breed [pluses plus]                                   ; change new urban into plus sign
 
 developers-own [
                 developer-age                         ; Time from first land acquisition to release
@@ -87,12 +89,12 @@ patches-own [
 ;==========================
 
 to load-input
-  
-  clear-all 
-  
+
+  clear-all
+
   gis:load-coordinate-system (word "Input/landcover_94.prj")
   gis:set-world-envelope [644205 756105 -753435 -652635]
-  
+
   ; load adm boundary
   let boundary gis:load-dataset (word "Input/JMA_adm2_jkt_merge.shp")
   foreach gis:feature-list-of boundary
@@ -100,27 +102,27 @@ to load-input
      gis:set-drawing-color 3
      gis:draw ? 1.0
    ]
-   
+
    ; load circular lines
   let circular gis:load-dataset (word "Input/JMA_radius.shp")
   foreach gis:feature-list-of circular
    [
      gis:set-drawing-color white
      gis:draw ? 2.5
-     
+
      gis:set-drawing-color red
      gis:draw ? 2
    ]
-  
-  
+
+
   ; load legendScale
 ;  let legendScale gis:load-dataset (word "Input/legend_scale_10_20.shp")
 ;  foreach gis:feature-list-of legendScale
 ;   [
 ;     gis:set-drawing-color 0
-;     gis:draw ? 2.0     
+;     gis:draw ? 2.0
 ;   ]
-;  
+;
 ;    ; load legendNorth
 ;  let legendNorth gis:load-dataset (word "Input/legend_north.shp")
 ;  foreach gis:feature-list-of legendNorth
@@ -129,8 +131,8 @@ to load-input
 ;     gis:draw ? 1.0
 ;     gis:fill ? 0
 ;   ]
-;  
-  
+;
+
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
   foreach sort patches [ask ? [set field-land-use-ori file-read] ]
@@ -182,6 +184,7 @@ to setup
 
   define-land                                         ; set default parameters for environment
   define-developers                                   ; display agent, and load initial values
+  define-plus
 
   view-landuse
   reset-ticks
@@ -235,7 +238,7 @@ to view-landuse
     if field-land-use = 7      [set pcolor red]                     ; Commercial industries
     if field-land-use = 55     [set pcolor black]                 ; NEW resid area
   ]
-  
+
 ;    ask patches
 ;  [
 ;    if field-land-use = 0      [set pcolor grey]                  ; No data  ; show extract-rgb grey
@@ -245,11 +248,12 @@ to view-landuse
 ;    if field-land-use = 4      [set pcolor green]                 ; Vegetation sparse
 ;    if field-land-use = 5      [set pcolor pink]                  ; Residential dense
 ;    if field-land-use = 6      [set pcolor yellow]                ; Residential sparse/vegetated
-;    if field-land-use = 7      [set pcolor red]                   ; Commercial industries 
-;    if field-land-use = 55     [set pcolor black]                 ; NEW resid area   
+;    if field-land-use = 7      [set pcolor red]                   ; Commercial industries
+;    if field-land-use = 55     [set pcolor black]                 ; NEW resid area
 ;  ]
 ;end
-  
+  ask pluses [set color black]
+
 end
 
 to view-distance-road
@@ -279,6 +283,8 @@ to view-land-value
     if field-land-use = 1            [set pcolor white]           ; Sea water
     if field-land-use = 55           [set pcolor black]           ; New urban area
   ]
+
+  ask pluses [set color red]
 end
 
 to view-distance-cbd
@@ -357,6 +363,10 @@ to define-land
   ]
 end
 
+
+to define-plus
+  set-default-shape pluses "x"
+end
 
 
 
@@ -583,6 +593,13 @@ to update-land-cover
     set field-developed?   "true"
     set field-land-use      55
     set pcolor              black
+
+    sprout-pluses 1
+    [
+      set shape "xx"
+      set color black
+      set size 4
+    ]
   ]
 
   let patches-neighbour patches in-radius ( 3 / .3) with [ field-land-value-pxl > 0 ]  ; field-assessment-radius
@@ -595,7 +612,19 @@ to update-land-cover
     set field-developed?   "true"
     set field-land-use      55
     set pcolor              black
+
+    sprout-pluses 1
+    [
+      set shape "xx"
+      set color black
+      set size 4
+    ]
+
+
   ]
+
+
+
 end
 
 
@@ -705,13 +734,13 @@ end
 ; REMEMBER TO CHANGE the name of the folder OUTPUT/"DATE"/
 
 to export-current-view
-  clear-turtles
+  ask developers [die]
   set view-mode "land-cover"
   update-view
-  export-view  (word "Output/20160421/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
+  export-view  (word "Output/20190320/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
   set view-mode  "land-value"
   update-view
-  export-view  (word "Output/20160421/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
+  export-view  (word "Output/20190320/Figure/" view-mode "_" initial-loan "_" initial-capital ".png")
 end
 
 
@@ -722,11 +751,11 @@ end
 GRAPHICS-WINDOW
 210
 10
-1712
-1385
+966
+713
 -1
 -1
-4.0
+2.0
 1
 10
 1
@@ -1398,8 +1427,14 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 
+xx
+false
+0
+Line -7500403 true 0 0 300 300
+Line -7500403 true 0 300 300 0
+
 @#$#@#$#@
-NetLogo 5.0.5
+NetLogo 5.3.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
