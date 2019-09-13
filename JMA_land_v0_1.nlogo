@@ -4,6 +4,7 @@
 ; -- first created 28/08/2014
 ; -- modified 29/08/2014 the go procedure
 ; -- modified 18/11/2014 add update procedure etc
+; -- version 0.1
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
