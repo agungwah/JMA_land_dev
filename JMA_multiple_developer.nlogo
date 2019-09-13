@@ -10,9 +10,13 @@
 ; --  - Land expansion and land values change according to feasible pixel
 ; --  - Developer profit is collected during the run
 ; --  - Developer has typology . Small, large, and mix
-; --  - 23/10/2015 Version  0.1
+; --  - 23/10/2015 ; This is ABM version 0.2
 ; --  - Decision on developing = Revenue should be larger than init capital + loan for large dev
 ; --  - Regained capital = capital after cost for the development + expected revenue
+; --  - 30/10/2015
+; --  - Addition of variability in the developers capital and characteristics
+; --  - 7/APr/2016
+; --  - Addition of adm boundary
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
@@ -26,6 +30,8 @@
 ; average hh size 4.3 p.190
 
 ; conversion of urban area into house, CO2, or population, has significant impact on urban policy.
+; 23/04/2016; modification from jma-adm, to JMA_adm2_jkt_merge
+;             add jma-circular
 
 
 ;==========================
@@ -88,8 +94,19 @@ patches-own [
 
 to load-input
   
+  clear-all 
+  
   gis:load-coordinate-system (word "Input/landcover_94.prj")
   gis:set-world-envelope [644205 756105 -753435 -652635]
+  
+  ; load adm boundary
+  let boundary gis:load-dataset (word "Input/JMA_adm2_jkt_merge.shp")
+  foreach gis:feature-list-of boundary
+   [
+     gis:set-drawing-color 3
+     gis:draw ? 1.0
+   ]
+  
   
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
@@ -274,9 +291,9 @@ to define-developers-small
     set developer-profit-cumul    0
     set developer-develop-time    12
     
-    let init-capital-small        1000
+    let init-capital-small        define-uniform-range 1000 3000
     let init-loan-small           20 / 100
-    let teta-error                3  / 100
+    let teta-error                0  / 100
     let profit-margin             15  / 100
     
     set developer-capital-init    (1 + random-float teta-error) * init-capital-small 
@@ -312,9 +329,9 @@ to define-developers-large
     set developer-profit-cumul    0
     set developer-develop-time    18
         
-    let init-capital-large        5000
+    let init-capital-large        define-uniform-range 3000 10000
     let init-loan-large           75 / 100
-    let teta-error                3  / 100
+    let teta-error                0  / 100
     let profit-margin             15 / 100
     
     set developer-capital-init    (1 + random-float teta-error) * init-capital-large
@@ -666,8 +683,9 @@ to update-developer-characteristic
           set color                       blue
           
           set   developer-search-area     30                     
-          set   developer-target-size     10                  ; 10 hectare =~ 1 cells
           set   developer-develop-time    12
+          let   dev-target                define-minmax-range developer-capital 10 100
+          set   developer-target-size     dev-target
         ]
 
       ]
@@ -685,8 +703,9 @@ to update-developer-characteristic
           set color                       red
           
           set   developer-search-area     500                     
-          set   developer-target-size     100               ; 100 hectare =~ 10 cells
           set   developer-develop-time    18                    ; 18 ticks (months) they have no limit on deadline
+          let   dev-target                define-minmax-range developer-capital 100 500
+          set   developer-target-size     dev-target
         ]
         
       ]
@@ -811,6 +830,20 @@ to-report land-value-increased
   let dist-max  20
   report ( 1 + (alpha * ( exp ( beta * (field-dist-new-urban ^ 2) / (dist-max ^ 2)) )) )                               
 end
+
+
+to-report define-uniform-range [  min-range max-range ]
+  let random-coeff random-float 1
+  report  ( min-range + ( random-coeff * ( max-range - min-range)))
+end
+
+to-report define-minmax-range [value min-range-target max-range-target] 
+  let min-range min [developer-capital] of developers
+  let max-range max [developer-capital] of developers
+  
+  report ((value - min-range)/(max-range - min-range)*(max-range-target - min-range-target))
+end
+
 
 
 ;==========================
@@ -1105,7 +1138,7 @@ num-dev-large
 num-dev-large
 0
 50
-50
+10
 1
 1
 NIL
@@ -1120,7 +1153,7 @@ num-dev-small
 num-dev-small
 0
 50
-0
+10
 1
 1
 NIL
