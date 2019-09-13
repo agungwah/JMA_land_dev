@@ -3,19 +3,22 @@
 ; -- the structure of coding was adapted from Valbuena effect of farmer decision on the landscape of Dutch rural region
 ; -- created by Agung Wahyudi
 ; -- first created 02/07/2015
-; -- modification from JMA_land_devt_v0_1.nlogo file
+; -- modification from JMA_adv_abm_v0_1.nlogo file
 ; --  the modificaiton include 
+; --  - three types agents
+; --  - retunr of revenue from investment (not capital)
+; --  - from version 0.2
 ; --  - Land searching, everywhere for large dev, in-radius for small dev
 ; --  - Land decision to build,or no build
 ; --  - Land expansion and land values change according to feasible pixel
 ; --  - Developer profit is collected during the run
 ; --  - Developer has typology . Small, large, and mix
-; --  - 23/10/2015 ; This is ABM version 0.2
+; --  - 23/10/2015
 ; --  - Decision on developing = Revenue should be larger than init capital + loan for large dev
 ; --  - Regained capital = capital after cost for the development + expected revenue
 ; --  - 30/10/2015
 ; --  - Addition of variability in the developers capital and characteristics
-; --  - 7/APr/2016
+; --  - 7/APr/2016  ; This is ABM version 1 (three types developers)
 ; --  - Addition of adm boundary
 
 ; some facts from winarso
@@ -30,8 +33,6 @@
 ; average hh size 4.3 p.190
 
 ; conversion of urban area into house, CO2, or population, has significant impact on urban policy.
-; 23/04/2016; modification from jma-adm, to JMA_adm2_jkt_merge
-;             add jma-circular
 
 
 ;==========================
@@ -42,7 +43,7 @@ globals    [view-mode landCov94 landValue newraster]
 breed      [developers developer]
 
 developers-own [
-                developer-type                        ; classification of developers based on capital, "large", "small"
+                developer-type                        ; classification of developers based on capital, "large", "medium", and "small"
                 developer-age				                  ; Time frome first land acquisition to release
                 developer-capital-init		            ; Unit in billion IDR. Initial capital
                 developer-capital-loan 		            ; Unit in billion IDR. loan from external sources, max 75% from initial capital
@@ -93,20 +94,11 @@ patches-own [
 ;==========================
 
 to load-input
-  
+
   clear-all 
   
   gis:load-coordinate-system (word "Input/landcover_94.prj")
   gis:set-world-envelope [644205 756105 -753435 -652635]
-  
-  ; load adm boundary
-  let boundary gis:load-dataset (word "Input/JMA_adm2_jkt_merge.shp")
-  foreach gis:feature-list-of boundary
-   [
-     gis:set-drawing-color 3
-     gis:draw ? 1.0
-   ]
-  
   
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
@@ -145,6 +137,47 @@ to load-input
     set field-dist-cbd-ori precision field-dist-cbd-ori 1              ; set two decimal behind comma
   ]
   
+  
+  ; load spatial attributes : legend, north, scale, adm
+    
+  ; load adm boundary
+  let boundary gis:load-dataset (word "Input/JMA_adm2_jkt_merge.shp")
+  foreach gis:feature-list-of boundary
+   [
+     gis:set-drawing-color 3
+     gis:draw ? 1.0
+   ]
+   
+   ; load circular lines
+  let circular gis:load-dataset (word "Input/JMA_radius.shp")
+  foreach gis:feature-list-of circular
+   [
+     gis:set-drawing-color white
+     gis:draw ? 2.5
+     
+     gis:set-drawing-color red
+     gis:draw ? 2
+   ]
+  
+  
+;  load legendScale
+;  let legendScale gis:load-dataset (word "Input/legend_scale_10_20.shp")
+;  foreach gis:feature-list-of legendScale
+;   [
+;     gis:set-drawing-color 0
+;     gis:draw ? 2.0     
+;   ]
+;  
+;    ; load legendNorth
+;  let legendNorth gis:load-dataset (word "Input/legend_north.shp")
+;  foreach gis:feature-list-of legendNorth
+;   [
+;     gis:set-drawing-color 0
+;     gis:draw ? 1.0
+;     gis:fill ? 0
+;   ]
+; 
+  
 end
 	
 
@@ -159,6 +192,7 @@ to setup
   
   define-land                                         ; set default parameters for environment
   define-developers-small                             ; display small dev, and load initial values
+  define-developers-med                               ; display medium dev, and load initial values
   define-developers-large                             ; display large dev, and load initial values
     
   view-landuse
@@ -214,8 +248,9 @@ to view-landuse
     if field-land-use = 5      [set pcolor pink]                  ; Residential dense
     if field-land-use = 6      [set pcolor yellow]                ; Residential sparse/vegetated
     if field-land-use = 7      [set pcolor red]                   ; Commercial industries 
-    if field-land-use = 50     [set pcolor black]                 ; NEW resid area developed by small dev (0)
-    if field-land-use = 51     [set pcolor black]                 ; NEW resid area developed by large dev (1)
+    if field-land-use = 50     [set pcolor black]                 ; NEW resid area developed by small dev 
+    if field-land-use = 51     [set pcolor black]                 ; NEW resid area developed by medium dev 
+    if field-land-use = 52     [set pcolor black]                 ; NEW resid area developed by large dev 
   ]
 end
 
@@ -231,7 +266,8 @@ to view-distance-road
     if field-land-use = 0            [set pcolor grey + 2]        ; No data 
     if field-land-use = 1            [set pcolor grey + 2 ]       ; Sea water
     if field-land-use = 50           [set pcolor black]           ; NEW resid area developed by small dev (0)
-    if field-land-use = 51           [set pcolor black]           ; NEW resid area developed by large dev (1)
+    if field-land-use = 51           [set pcolor black]           ; NEW resid area developed by med dev (1)
+    if field-land-use = 52           [set pcolor black]           ; NEW resid area developed by large dev (2)
   ]
 end
 
@@ -246,7 +282,8 @@ to view-land-value
     if field-land-value-ori = -9999  [set pcolor grey + 2]        ; NoData
     if field-land-use = 1            [set pcolor grey + 2]        ; Sea water
     if field-land-use = 50           [set pcolor black]           ; NEW resid area developed by small dev (0)
-    if field-land-use = 51           [set pcolor black]           ; NEW resid area developed by large dev (1)
+    if field-land-use = 51           [set pcolor black]           ; NEW resid area developed by med dev (1)
+    if field-land-use = 52           [set pcolor black]           ; NEW resid area developed by large dev (2)
   ]
 end
 
@@ -259,6 +296,7 @@ to view-distance-cbd
     if field-land-use = 0            [set pcolor grey + 2]        ; No data 
     if field-land-use = 50           [set pcolor black]           ; NEW resid area developed by small dev (0)
     if field-land-use = 51           [set pcolor black]           ; NEW resid area developed by large dev (1)
+    if field-land-use = 52           [set pcolor black]           ; NEW resid area developed by large dev (2)
   ]  
 end
 
@@ -281,8 +319,8 @@ to define-developers-small
     
     set size                      10
     set shape                     "person"
-    set label-color               blue
-    set color                     blue
+    set label-color               lime
+    set color                     lime
     
     set developer-type            "small"
     set developer-mode            "searching"
@@ -291,17 +329,57 @@ to define-developers-small
     set developer-profit-cumul    0
     set developer-develop-time    12
     
-    let init-capital-small        define-uniform-range 1000 3000
+    let init-capital-small-min    1000
+    let init-capital-small-max    5000
     let init-loan-small           20 / 100
-    let teta-error                0  / 100
+    let teta-error                3  / 100
     let profit-margin             15  / 100
     
-    set developer-capital-init    (1 + random-float teta-error) * init-capital-small 
+    set developer-capital-init    random (init-capital-small-max - init-capital-small-min) + init-capital-small-min 
     set developer-capital-loan    developer-capital-init        * init-loan-small
     set developer-capital         developer-capital-init        + developer-capital-loan
 
     set developer-profit-expected developer-capital             * profit-margin
-    set developer-revenue-here    developer-capital             * [field-profit-as-dist-cbd] of patch-here 
+    set developer-revenue-here    developer-capital             * [field-revenue-dist-cbd] of patch-here 
+    set developer-lv-perceived    land-value-perceived
+    set developer-count-down      developer-develop-time
+
+    update-developer-characteristic
+  ]
+end
+
+
+to define-developers-med
+  
+  create-developers num-dev-med
+  [ 
+    let land-position patches with [field-land-use > 2]                                                 
+    move-to one-of land-position
+    
+    set size                      10
+    set shape                     "person"
+    set label-color               yellow
+    set color                     yellow
+    
+    set developer-type            "medium"
+    set developer-mode            "searching"
+    set developer-age             0
+    set developer-land-size       0
+    set developer-profit-cumul    0
+    set developer-develop-time    12
+    
+    let init-capital-med-min      5000
+    let init-capital-med-max      7000
+    let init-loan-med             50 / 100
+    let teta-error                3  / 100
+    let profit-margin             15  / 100
+    
+    set developer-capital-init    random (init-capital-med-max - init-capital-med-min) + init-capital-med-min  
+    set developer-capital-loan    developer-capital-init        * init-loan-med
+    set developer-capital         developer-capital-init        + developer-capital-loan
+
+    set developer-profit-expected developer-capital             * profit-margin
+    set developer-revenue-here    developer-capital             * [field-revenue-dist-cbd] of patch-here 
     set developer-lv-perceived    land-value-perceived
     set developer-count-down      developer-develop-time
 
@@ -329,17 +407,18 @@ to define-developers-large
     set developer-profit-cumul    0
     set developer-develop-time    18
         
-    let init-capital-large        define-uniform-range 3000 10000
+    let init-capital-large-min    7000
+    let init-capital-large-max    10000
     let init-loan-large           75 / 100
-    let teta-error                0  / 100
+    let teta-error                3  / 100
     let profit-margin             15 / 100
     
-    set developer-capital-init    (1 + random-float teta-error) * init-capital-large
+    set developer-capital-init    random (init-capital-large-max - init-capital-large-min) + init-capital-large-min  
     set developer-capital-loan    developer-capital-init        * init-loan-large
     set developer-capital         developer-capital-init        + developer-capital-loan
 
     set developer-profit-expected developer-capital             * profit-margin
-    set developer-revenue-here    developer-capital             * [field-profit-as-dist-cbd] of patch-here 
+    set developer-revenue-here    developer-capital             * [field-revenue-dist-cbd] of patch-here 
     set developer-lv-perceived    land-value-perceived
     set developer-count-down      developer-develop-time
 
@@ -372,6 +451,8 @@ end
 ;==========================
 
 
+;========================== 1. Land searching
+
 to land-development-find
 ; option, movement (i) random, (ii) frog jump, and (iii) fwd shift
 ; option (i)    setxy random-xcor random-ycor 
@@ -398,7 +479,7 @@ to land-development-find
         [ move-to one-of find-suit-patches ]
         [ die ] ; out from the arena
       
-        let search-cost             0.050
+        let search-cost             0.100      ; Rp. 100 juta (million)
         set developer-capital       precision  (developer-capital - search-cost) 2
         set developer-lv-perceived  precision  (land-value-perceived )           2
       
@@ -409,6 +490,38 @@ to land-development-find
         
       ] 
     ]
+    
+    
+   if (developer-type = "medium") and (developer-mode = "searching")
+    [
+      ifelse (developer-capital > 0) and (any? patches with [field-visited? = "false"])          
+      [
+        set developer-cost-here    0
+        set developer-land-size    0 
+        set developer-profit-here  0
+        
+        let find-suit-patches   patches with 
+                              [ field-land-value >= 0      and
+                                field-visited?   = "false" and
+                                field-land-use   > 2
+                              ]  
+                                               
+        ifelse any? find-suit-patches 
+        [ move-to one-of find-suit-patches ]
+        [ die ] ; out from the arena
+      
+        let search-cost             0.050      ; Rp. 50 juta (million)
+        set developer-capital       precision  (developer-capital - search-cost) 2
+        set developer-lv-perceived  precision  (land-value-perceived )           2
+      
+        ask patch-here [ set field-visited? "true" ]
+      ]
+      [ if developer-capital <= 0 [die]
+        if patches with [field-visited? = "false"] = nobody [stop]
+        
+      ] 
+    ]
+    
     
     if (developer-type = "small") and (developer-mode = "searching")
     [
@@ -428,7 +541,7 @@ to land-development-find
         [ move-to one-of find-suit-patches ]
         [ die ] ; out from the arena
         
-        let search-cost             0.010
+        let search-cost             0.010      ; Rp. 10 juta (million)
         set developer-capital       precision  (developer-capital - search-cost) 2
         set developer-lv-perceived  precision  (land-value-perceived )           2
         ask patch-here [ set field-visited? "true" ]
@@ -447,15 +560,16 @@ to land-development-find
 end
 
 
-
+;========================== 2. Land assessment
 
 ; Land assessment analises the expected revenue, and cost estimated from the pixel where the developers currently stand.
 ; The construction composes of two parts; the cost of the development in the centre pixel
-; and the neighbouring cell
+; and the neighbouring cells
 ; the cost in the centre consists of perceived land val, connecting road, and land converting cost
 ; the neighbouring cost, is without the connecting road
-; the potential revenues based on the logistic based function field-profit-as-dist-cbd of patches in the surrounding
-; and multiply with the developer capital.
+; the potential revenues based on the logistic based function field-revenue-dist-cbd of patches in the surrounding
+; and multiply with the perceived land value.
+; and multiply with the perceived field_land.
 to land-development-assessment
   
   ask developers 
@@ -467,17 +581,16 @@ to land-development-assessment
       let patches-neighbour        patches in-radius 
           search-radius-vicinity   with  [ field-land-value-pxl > 0 ]                ; field-assessment-radius
       let patches-neighbour-target min-n-of   
-          (developer-target-size / 9) patches-neighbour [distance myself]        ; change into selecting the closer and lower cost cell
+          (developer-target-size / 9) patches-neighbour [distance myself]        ; change ha to cell; the closer and lower cost cell
             
-      set developer-cost-here   ( [field-total-cost] of patch-here  + sum [field-expansion-cost] of patches-neighbour-target   )  
+      set developer-cost-here   ( [field-centre-cost] of patch-here  + sum [field-neighbour-cost] of patches-neighbour-target   )  
       set developer-cost-here    precision developer-cost-here 2
       set developer-land-size    count patches-neighbour-target
       
       set developer-patches      (patch-set patch-here patches-neighbour-target)
       
       ; expected revenue
-      set developer-revenue-here (   ( [field-profit-as-dist-cbd * land-value-perceived] of patch-here)  +
-                                sum  ( [field-profit-as-dist-cbd * land-value-perceived] of patches-neighbour-target )  )
+      set developer-revenue-here sum ([field-revenue-dist-cbd * land-value-perceived] of developer-patches )
       set developer-revenue-here precision  developer-revenue-here 2
       
       
@@ -490,6 +603,37 @@ to land-development-assessment
       ]
     ]
     
+    
+   if  (developer-type = "medium") and (developer-mode = "searching")
+    [
+      ; cost
+      let search-radius-vicinity                       5                         ; cells or equals to 10 x 0.3 km = 3 km
+      let patches-neighbour        patches in-radius 
+          search-radius-vicinity   with [ field-land-value-pxl > 0 ]                ; field-assessment-radius
+      let patches-neighbour-target min-n-of   
+          (developer-target-size / 9) patches-neighbour [distance myself]        ; change into selecting the closer and lower cost cell
+            
+      set developer-cost-here   ( [field-centre-cost] of patch-here  + sum [field-neighbour-cost] of patches-neighbour-target   )                                                  ; total cost
+      set developer-cost-here    precision developer-cost-here 2
+      set developer-land-size    count patches-neighbour-target
+
+      set developer-patches      (patch-set patch-here patches-neighbour-target)
+      
+      ; expected revenue
+      set developer-revenue-here sum ([field-revenue-dist-cbd * land-value-perceived] of developer-patches )
+      set developer-revenue-here precision  developer-revenue-here 2
+      
+      ; profit
+      set developer-profit-here (developer-revenue-here - developer-cost-here)
+      set developer-profit-here precision developer-profit-here 2 
+      ask patches-neighbour-target 
+      [ set field-assessed? "true" 
+        set field-visited?  "true"
+      ]
+    ]
+    
+    
+    
     if  (developer-type = "small") and (developer-mode = "searching")
     [
       ; cost
@@ -499,15 +643,17 @@ to land-development-assessment
       let patches-neighbour-target min-n-of   
           (developer-target-size / 9) patches-neighbour [distance myself]        ; change into selecting the closer and lower cost cell
             
-      set developer-cost-here   ( [field-total-cost] of patch-here  + sum [field-expansion-cost] of patches-neighbour-target   )                                                  ; total cost
+      set developer-cost-here   ( [field-centre-cost] of patch-here  + sum [field-neighbour-cost] of patches-neighbour-target   )                                                  ; total cost
       set developer-cost-here    precision developer-cost-here 2
       set developer-land-size    count patches-neighbour-target
 
       set developer-patches      (patch-set patch-here patches-neighbour-target)
       
       ; expected revenue
-      set developer-revenue-here (   ( [field-profit-as-dist-cbd * land-value-perceived] of patch-here)  +
-                                sum  ( [field-profit-as-dist-cbd * land-value-perceived] of patches-neighbour-target )  )
+      set developer-revenue-here sum ([field-revenue-dist-cbd * land-value-perceived] of developer-patches )
+
+      ;set developer-revenue-here (   ( [field-revenue-dist-cbd * field-centre-cost] of patch-here)  +
+      ;                          sum  ( [field-revenue-dist-cbd * field-neighbour-cost] of patches-neighbour-target )  )
       set developer-revenue-here precision  developer-revenue-here 2
       
       ; profit
@@ -525,30 +671,25 @@ to land-development-assessment
  end
 
 
+;========================== 3. Land decision
 to land-development-decision
   ask developers 
   [ 
-    if (developer-type = "large")  and (developer-mode = "searching")
+    if developer-mode = "searching"
     [
       ifelse  (developer-revenue-here >= developer-capital) and
               (developer-cost-here    <= developer-capital) and
               (developer-profit-here  >= developer-profit-expected) ; maybe use a range
+              
       [ set developer-mode "developing" ]
       [ set developer-mode "searching"  ] 
-    ]
-    
-    if (developer-type = "small")  and (developer-mode = "searching")
-    [
-      ifelse  (developer-cost-here   < developer-capital) and
-              (developer-profit-here > developer-profit-expected) ; maybe use a range
-      [ set developer-mode "developing" ]
-      [ set developer-mode "searching"  ]
-    ]
-    
-  ] 
+  
+    ]  ] 
 end
 
 
+
+;========================== 4. Land action
 ; set new land cover
 ; set new land value
 ; set new developer profit
@@ -558,6 +699,7 @@ to land-development-action
   ask developers 
   
   [ 
+    ; action by small developer
     if (developer-type = "small")      and 
        (developer-mode = "developing") and
        (developer-count-down > 0)
@@ -591,6 +733,42 @@ to land-development-action
 
        ]
        
+     
+     ; action by medium developer
+     
+    if (developer-type = "medium")     and 
+       (developer-mode = "developing") and
+       (developer-count-down > 0)
+       
+       [
+         set label developer-count-down
+         set developer-count-down (developer-count-down - 1)   ; decrement-timer
+         set developer-capital    (developer-capital - (developer-cost-here / developer-develop-time))  ; pay to acquire and develop the land
+       ]
+    
+    if (developer-type = "medium")     and 
+       (developer-mode = "developing") and
+       (developer-count-down = 0)
+
+       [
+         ask developer-patches
+         [
+           set field-assessed?    "true" 
+           set field-visited?     "true"
+           set field-developed?   "true"   
+           set field-land-use      51
+           set pcolor              black
+         ]
+         
+         update-land-value
+         update-developer-capital
+         
+         set developer-mode  "searching"
+         set developer-count-down developer-develop-time
+       ]
+       
+       
+       
      ; action by large developer
      
     if (developer-type = "large")      and 
@@ -613,7 +791,7 @@ to land-development-action
            set field-assessed?    "true" 
            set field-visited?     "true"
            set field-developed?   "true"   
-           set field-land-use      51
+           set field-land-use      52
            set pcolor              black
          ]
          
@@ -643,9 +821,12 @@ to update-developer
     [                                                               ; categorize the developer as per capital (and the size owned??)
       if (developer-mode = "searching") 
       [
-        let developer-capital-cutoff 5000                            
-        if  developer-capital <= developer-capital-cutoff [set developer-type "small"]
-        if  developer-capital >  developer-capital-cutoff [set developer-type "large"]
+        let developer-capital-low  5000      
+        let developer-capital-high 7000                    
+        if  developer-capital <= developer-capital-low  [set developer-type "small"]
+        if  developer-capital >  developer-capital-low  and 
+            developer-capital <= developer-capital-high [set developer-type "medium"]  
+        if  developer-capital >  developer-capital-high [set developer-type "large"]
       ]
     
       set developer-age (developer-age + 1)                         ; developer gets older regardles the capital or mode
@@ -679,18 +860,35 @@ to update-developer-characteristic
         ]
         [ 
           set size                        10
-          set label-color                 blue
-          set color                       blue
+          set label-color                 lime
+          set color                       lime
           
           set   developer-search-area     30                     
+          set   developer-target-size     10                  ; 10 hectare =~ 1 cells
           set   developer-develop-time    12
-          let   dev-target                define-minmax-range developer-capital 10 100
-          set   developer-target-size     dev-target
         ]
 
       ]
       
-       if developer-type = "large" 
+      if developer-type = "medium" 
+      [ 
+        ifelse (developer-mode = "developing") 
+        [ set color gray
+          set label developer-count-down
+        ]
+        [ 
+          set size                        10
+          set label-color                 yellow
+          set color                       yellow
+          
+          set   developer-search-area     100                     
+          set   developer-target-size     50                  ; 10 hectare =~ 1 cells
+          set   developer-develop-time    15
+        ]
+
+      ]
+      
+     if developer-type = "large" 
       [ 
         ifelse (developer-mode = "developing") 
         [ 
@@ -703,9 +901,8 @@ to update-developer-characteristic
           set color                       red
           
           set   developer-search-area     500                     
+          set   developer-target-size     100                   ; 100 hectare =~ 10 cells
           set   developer-develop-time    18                    ; 18 ticks (months) they have no limit on deadline
-          let   dev-target                define-minmax-range developer-capital 100 500
-          set   developer-target-size     dev-target
         ]
         
       ]
@@ -759,8 +956,10 @@ to update-plot
   set-current-plot "New urban"
   set-current-plot-pen "New urban by small dev"
   plot (count patches with [field-land-use = 50] * 9)
-  set-current-plot-pen "New urban by large dev"
+  set-current-plot-pen "New urban by med dev"
   plot (count patches with [field-land-use = 51] * 9)
+  set-current-plot-pen "New urban by large dev"
+  plot (count patches with [field-land-use = 52] * 9)
   
  
 end
@@ -780,7 +979,7 @@ end
 ; unit in percent of developers capital?? or raw land value pixel
 ; Gaussian function
 ; based on empirical studies on different location or theory
-to-report field-profit-as-dist-cbd
+to-report field-revenue-dist-cbd
   let alpha     1
   let beta      -3
   let dist-max  50
@@ -810,16 +1009,17 @@ to-report field-site-clearance
   if field-land-use = 6      [ report field-land-value-pxl * 0.2 ]                  ; Residential sparse/vegetated
   if field-land-use = 7      [ report field-land-value-pxl * 3   ]                  ; Commercial industries 
   if field-land-use = 50     [ report field-land-value-pxl * 1   ]                  ; NEW resid area by small dev 
-  if field-land-use = 51     [ report field-land-value-pxl * 1   ]                  ; NEW resid area by large dev     
+  if field-land-use = 51     [ report field-land-value-pxl * 1   ]                  ; NEW resid area by large med
+  if field-land-use = 52     [ report field-land-value-pxl * 1   ]                  ; NEW resid area by large dev      
 end
 
 
-to-report field-total-cost
+to-report field-centre-cost
   report ( land-value-perceived + field-road-construction + field-site-clearance ) ; overhead component? large in large dev??
 end
 
 
-to-report field-expansion-cost
+to-report field-neighbour-cost
   report ( land-value-perceived + field-site-clearance )
 end
 
@@ -832,20 +1032,6 @@ to-report land-value-increased
 end
 
 
-to-report define-uniform-range [  min-range max-range ]
-  let random-coeff random-float 1
-  report  ( min-range + ( random-coeff * ( max-range - min-range)))
-end
-
-to-report define-minmax-range [value min-range-target max-range-target] 
-  let min-range min [developer-capital] of developers
-  let max-range max [developer-capital] of developers
-  
-  report ((value - min-range)/(max-range - min-range)*(max-range-target - min-range-target))
-end
-
-
-
 ;==========================
 ; EXPORT
 ;==========================
@@ -853,22 +1039,25 @@ end
 
 to export-land-cover
   set newraster gis:patch-dataset field-land-use 
-  gis:store-dataset newraster (word "Output/20151027/land_cover_" precision timer 0 ".asc")  
+  let labelDev (word num-dev-small "_" num-dev-med "_" num-dev-large)
+  gis:store-dataset newraster (word "Output/20160429/land_cover_" labelDev "_" precision timer 0 ".asc")  
 end 
 
 to export-land-value
   set newraster gis:patch-dataset field-land-value-pxl
-  gis:store-dataset newraster (word "Output/20151027/land_value_" precision timer 0 ".asc")
+  let labelDev (word num-dev-small "_" num-dev-med "_" num-dev-large)
+  gis:store-dataset newraster (word "Output/20160429/land_value_" labelDev "_" precision timer 0 ".asc")
 end 
 
 
 to export-current-view
+  let labelDev (word num-dev-small "_" num-dev-med "_" num-dev-large)
   set view-mode "land-cover"
   update-view
-  export-view  (word "Figure/02. Advanced model/" view-mode "_" precision timer 0 ".png")
+  export-view  (word "Output/20160429/Figure/" view-mode "_" labelDev "_" precision timer 0 ".png")
   set view-mode  "land-value"
   update-view
-  export-view  (word "Figure/02. Advanced model/" view-mode "_" precision timer 0 ".png")
+  export-view  (word "Output/20160429/Figure/" view-mode "_" labelDev "_" precision timer 0 ".png")
 end
 
 
@@ -945,9 +1134,9 @@ NIL
 BUTTON
 12
 169
-199
+205
 202
-Land values (10^9 IDR/sq m)
+Land values (Rp. billion/sq m)
 set view-mode \"land-value\"\nupdate-view\n\n
 NIL
 1
@@ -1075,10 +1264,10 @@ NIL
 1
 
 MONITOR
-927
-567
-994
-612
+719
+565
+786
+610
 Total (ha)
 (count patches with [field-land-use >= 50] * 9)
 17
@@ -1123,7 +1312,7 @@ MONITOR
 106
 913
 151
-Field visited (fields)
+Field visited (cells)
 count patches with [field-visited? = \"true\"]
 17
 1
@@ -1138,7 +1327,7 @@ num-dev-large
 num-dev-large
 0
 50
-10
+16
 1
 1
 NIL
@@ -1146,14 +1335,14 @@ HORIZONTAL
 
 SLIDER
 15
-344
+384
 187
-377
+417
 num-dev-small
 num-dev-small
 0
 50
-10
+16
 1
 1
 NIL
@@ -1162,10 +1351,10 @@ HORIZONTAL
 MONITOR
 851
 352
-910
+913
 397
-Dev small
-count developers with [developer-type = \"small\"]
+Dev med
+count developers with [developer-type = \"medium\"]
 17
 1
 11
@@ -1186,8 +1375,9 @@ true
 false
 "" ""
 PENS
-"New urban by small dev" 1.0 0 -14454117 true "" ""
-"New urban by large dev" 1.0 0 -5298144 true "" ""
+"New urban by small dev" 1.0 0 -13840069 true "" ""
+"New urban by med dev" 1.0 0 -1184463 true "" ""
+"New urban by large dev" 1.0 0 -2674135 true "" ""
 
 MONITOR
 786
@@ -1202,9 +1392,9 @@ count developers with [developer-type = \"large\"]
 
 BUTTON
 16
-386
+445
 141
-419
+478
 test
 land-development-find\nland-development-assessment\nland-development-decision\nland-development-action\nupdate-developer\nupdate-view\nupdate-plot\ntick\n
 T
@@ -1222,8 +1412,8 @@ MONITOR
 352
 981
 397
-Dev dev'ing
-count developers with [developer-mode = \"developing\"]
+Dev small
+count developers with [developer-type = \"small\"]
 17
 1
 11
@@ -1245,13 +1435,14 @@ false
 "" ""
 PENS
 "default" 1.0 0 -2674135 true "" "plot count developers with [developer-type = \"large\"]"
-"pen-1" 1.0 0 -13791810 true "" "plot count developers with [developer-type = \"small\"]"
+"pen-1" 1.0 0 -13840069 true "" "plot count developers with [developer-type = \"small\"]"
+"pen-2" 1.0 0 -1184463 true "" "plot count developers with [developer-type = \"medium\"]"
 
 MONITOR
-790
-567
-854
-612
+923
+564
+987
+609
 Urb Small
 (count patches with [field-land-use = 50] * 9)
 17
@@ -1259,41 +1450,41 @@ Urb Small
 11
 
 MONITOR
+790
+565
 857
-567
-924
-612
+610
 Urb Large
-(count patches with [field-land-use = 51] * 9)
+(count patches with [field-land-use = 52] * 9)
 17
 1
 11
 
 TEXTBOX
 19
-445
+504
 169
-463
+522
 Large developer
 11
 15.0
 1
 
 TEXTBOX
-20
-461
-170
-479
-Small developer
+18
+533
+168
+551
+Small-capital developer
 11
-105.0
+65.0
 1
 
 TEXTBOX
-19
-478
-169
-496
+18
+547
+168
+565
 Developing developer
 11
 5.0
@@ -1301,9 +1492,9 @@ Developing developer
 
 TEXTBOX
 18
-427
+486
 168
-445
+504
 LEGEND :
 11
 0.0
@@ -1359,6 +1550,42 @@ NIL
 NIL
 NIL
 1
+
+SLIDER
+15
+345
+187
+378
+num-dev-med
+num-dev-med
+0
+50
+13
+1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+18
+519
+168
+537
+Medium-capital developer
+11
+44.0
+1
+
+MONITOR
+860
+564
+919
+609
+Urb Med
+(count patches with [field-land-use = 51] * 9)
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1708,43 +1935,40 @@ NetLogo 5.0.5
 @#$#@#$#@
 @#$#@#$#@
 <experiments>
-  <experiment name="JMA_Adv_sensitivity_analysis" repetitions="1" runMetricsEveryStep="true">
+  <experiment name="JMA_Adv_scenario" repetitions="1" runMetricsEveryStep="false">
     <setup>setup</setup>
     <go>go</go>
-    <final>export-view (word "land_value " date-and-time ".png")</final>
-    <metric>count patches with [field-land-use = 55]</metric>
-    <enumeratedValueSet variable="initial-loan">
-      <value value="0"/>
-      <value value="75"/>
-    </enumeratedValueSet>
+    <metric>; count patches with [field-land-use &gt; 49] ; no separation</metric>
+    <metric>; count patches with [field-land-use = 50] ; new urban by small dev</metric>
+    <metric>; count patches with [field-land-use = 51] ; new urban by med   dev</metric>
+    <metric>; count patches with [field-land-use = 52] ; new urban by large dev</metric>
+    <metric>; modes [developer-capital] of developers with [developer-type = "small"]</metric>
     <enumeratedValueSet variable="num-dev-large">
-      <value value="4"/>
+      <value value="0"/>
+      <value value="50"/>
     </enumeratedValueSet>
-    <enumeratedValueSet variable="num-developers">
-      <value value="10"/>
+    <enumeratedValueSet variable="num-dev-med">
+      <value value="0"/>
+      <value value="50"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="num-dev-small">
-      <value value="9"/>
-    </enumeratedValueSet>
-    <enumeratedValueSet variable="initial-capital">
-      <value value="3000"/>
-      <value value="4000"/>
-      <value value="5000"/>
-    </enumeratedValueSet>
-    <enumeratedValueSet variable="field-assessment-radius">
-      <value value="0.1"/>
+      <value value="0"/>
+      <value value="50"/>
     </enumeratedValueSet>
   </experiment>
-  <experiment name="JMA_Adv_scenario0" repetitions="10" runMetricsEveryStep="true">
+  <experiment name="JMA_Adv_scenario_mix" repetitions="100" runMetricsEveryStep="false">
     <setup>setup</setup>
     <go>go</go>
-    <final>export-land-value
-export-land-cover</final>
-    <enumeratedValueSet variable="num-dev-small">
-      <value value="10"/>
-    </enumeratedValueSet>
+    <final>export-land-cover
+export-land-value</final>
     <enumeratedValueSet variable="num-dev-large">
-      <value value="10"/>
+      <value value="50"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-dev-med">
+      <value value="50"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-dev-small">
+      <value value="50"/>
     </enumeratedValueSet>
   </experiment>
 </experiments>
