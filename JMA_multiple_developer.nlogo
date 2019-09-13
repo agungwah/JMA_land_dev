@@ -10,6 +10,9 @@
 ; --  - Land expansion and land values change according to feasible pixel
 ; --  - Developer profit is collected during the run
 ; --  - Developer has typology . Small, large, and mix
+; --  - 23/10/2015 Version  0.1
+; --  - Decision on developing = Revenue should be larger than init capital + loan for large dev
+; --  - Regained capital = capital after cost for the development + expected revenue
 
 ; some facts from winarso
 ; 1 ha = 50 houses p.166
@@ -28,10 +31,9 @@
 ;==========================
 ; 1. DEFINE THE VARIABLES
 ;==========================
-
-globals [view-mode ]
-
-breed [developers developer]
+extensions [gis]
+globals    [view-mode landCov94 landValue newraster]
+breed      [developers developer]
 
 developers-own [
                 developer-type                        ; classification of developers based on capital, "large", "small"
@@ -85,6 +87,10 @@ patches-own [
 ;==========================
 
 to load-input
+  
+  gis:load-coordinate-system (word "Input/landcover_94.prj")
+  gis:set-world-envelope [644205 756105 -753435 -652635]
+  
   ; Load land use in 1994
   file-open "1994_jma_rsmpl.txt"
   foreach sort patches [ask ? [set field-land-use-ori file-read] ]
@@ -507,8 +513,9 @@ to land-development-decision
   [ 
     if (developer-type = "large")  and (developer-mode = "searching")
     [
-      ifelse  (developer-cost-here   < developer-capital) and
-              (developer-profit-here > developer-profit-expected) ; maybe use a range
+      ifelse  (developer-revenue-here >= developer-capital) and
+              (developer-cost-here    <= developer-capital) and
+              (developer-profit-here  >= developer-profit-expected) ; maybe use a range
       [ set developer-mode "developing" ]
       [ set developer-mode "searching"  ] 
     ]
@@ -575,7 +582,7 @@ to land-development-action
        
        [
          set label developer-count-down
-         set developer-count-down (developer-count-down - 1)   ;decrement-timer
+         set developer-count-down (developer-count-down - 1)   ; decrement-timer
          set developer-capital    (developer-capital - (developer-cost-here / developer-develop-time))  ; pay to acquire and develop the land
        ]
     
@@ -695,7 +702,7 @@ to update-developer-capital      ; developer procedure
   set developer-profit-cumul                                ; accumulate the profit
      (developer-profit-cumul    + developer-profit-here)
   set developer-capital                                     ; added the profit to capital after xx tick
-     (developer-capital         + developer-profit-cumul)
+     (developer-capital         + developer-revenue-here)
 
 end
 
@@ -806,7 +813,30 @@ to-report land-value-increased
 end
 
 
+;==========================
+; EXPORT
+;==========================
+; REMEMBER TO CHANGE the name of the folder OUTPUT/"DATE"/
 
+to export-land-cover
+  set newraster gis:patch-dataset field-land-use 
+  gis:store-dataset newraster (word "Output/20151027/land_cover_" precision timer 0 ".asc")  
+end 
+
+to export-land-value
+  set newraster gis:patch-dataset field-land-value-pxl
+  gis:store-dataset newraster (word "Output/20151027/land_value_" precision timer 0 ".asc")
+end 
+
+
+to export-current-view
+  set view-mode "land-cover"
+  update-view
+  export-view  (word "Figure/02. Advanced model/" view-mode "_" precision timer 0 ".png")
+  set view-mode  "land-value"
+  update-view
+  export-view  (word "Figure/02. Advanced model/" view-mode "_" precision timer 0 ".png")
+end
 
 
 ;==========================
@@ -821,13 +851,13 @@ end
 GRAPHICS-WINDOW
 210
 10
-966
-713
+779
+545
 -1
 -1
-2.0
+1.5
 1
-10
+8
 1
 1
 1
@@ -1012,9 +1042,9 @@ NIL
 1
 
 MONITOR
-1113
+927
 567
-1180
+994
 612
 Total (ha)
 (count patches with [field-land-use >= 50] * 9)
@@ -1023,9 +1053,9 @@ Total (ha)
 11
 
 MONITOR
-972
+786
 10
-1101
+915
 55
 Vegetation area (ha)
 (count patches with [field-land-use = 3] * 9) + (count patches with [field-land-use = 4] * 9)
@@ -1034,9 +1064,9 @@ Vegetation area (ha)
 11
 
 MONITOR
-972
+786
 58
-1100
+914
 103
 Existing urban (ha)
 (count patches with [field-land-use = 5] * 9) + (count patches with [field-land-use = 6] * 9) + (count patches with [field-land-use = 55] * 9)
@@ -1045,9 +1075,9 @@ Existing urban (ha)
 11
 
 MONITOR
-972
+786
 154
-1101
+915
 199
 Field assessed (ha)
 (count patches with [field-assessed? = \"true\"] * 9)
@@ -1056,9 +1086,9 @@ Field assessed (ha)
 11
 
 MONITOR
-972
+786
 106
-1099
+913
 151
 Field visited (fields)
 count patches with [field-visited? = \"true\"]
@@ -1075,7 +1105,7 @@ num-dev-large
 num-dev-large
 0
 50
-10
+50
 1
 1
 NIL
@@ -1090,16 +1120,16 @@ num-dev-small
 num-dev-small
 0
 50
-7
+0
 1
 1
 NIL
 HORIZONTAL
 
 MONITOR
-1037
+851
 352
-1096
+910
 397
 Dev small
 count developers with [developer-type = \"small\"]
@@ -1108,9 +1138,9 @@ count developers with [developer-type = \"small\"]
 11
 
 PLOT
-975
+789
 413
-1175
+989
 563
 New urban
 months
@@ -1127,9 +1157,9 @@ PENS
 "New urban by large dev" 1.0 0 -5298144 true "" ""
 
 MONITOR
-972
+786
 352
-1032
+846
 397
 Dev large
 count developers with [developer-type = \"large\"]
@@ -1155,9 +1185,9 @@ NIL
 1
 
 MONITOR
-1099
+913
 352
-1167
+981
 397
 Dev dev'ing
 count developers with [developer-mode = \"developing\"]
@@ -1166,9 +1196,9 @@ count developers with [developer-mode = \"developing\"]
 11
 
 PLOT
-972
+786
 200
-1172
+986
 350
 #Developer
 months
@@ -1185,9 +1215,9 @@ PENS
 "pen-1" 1.0 0 -13791810 true "" "plot count developers with [developer-type = \"small\"]"
 
 MONITOR
-976
+790
 567
-1040
+854
 612
 Urb Small
 (count patches with [field-land-use = 50] * 9)
@@ -1196,9 +1226,9 @@ Urb Small
 11
 
 MONITOR
-1043
+857
 567
-1110
+924
 612
 Urb Large
 (count patches with [field-land-use = 51] * 9)
@@ -1244,6 +1274,57 @@ TEXTBOX
 LEGEND :
 11
 0.0
+1
+
+BUTTON
+211
+548
+343
+581
+NIL
+export-land-cover
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+480
+549
+583
+582
+export view
+export-current-view
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+347
+549
+478
+582
+NIL
+export-land-value
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
 1
 
 @#$#@#$#@
@@ -1619,6 +1700,18 @@ NetLogo 5.0.5
     </enumeratedValueSet>
     <enumeratedValueSet variable="field-assessment-radius">
       <value value="0.1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="JMA_Adv_scenario0" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <final>export-land-value
+export-land-cover</final>
+    <enumeratedValueSet variable="num-dev-small">
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="num-dev-large">
+      <value value="10"/>
     </enumeratedValueSet>
   </experiment>
 </experiments>
