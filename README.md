@@ -1,7 +1,7 @@
 # JMA_land_dev
 
 ## Requirement
-The model could only run on NetLogo 5.3. 
+The model runs on NetLogo 5.3. 
 
 ## Introduction
 This is a repository of my PhD project on modelling the urban growth pattern using Agent-based modelling approach. The urban simulation models aim to improve our understanding on how various type of private developers influence the urban development, land values, and land pattern of megacity like Jakarta Metropolitan Area (JMA), Indonesia.
